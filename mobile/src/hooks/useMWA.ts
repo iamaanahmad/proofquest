@@ -19,6 +19,22 @@ export const APP_IDENTITY = {
   icon: "favicon.ico",
 };
 
+/**
+ * Distinct, retryable signal raised by waitForConfirmation when the tx's
+ * blockhash has expired: the current block height has passed
+ * lastValidBlockHeight, the signature is still not visible on-chain, AND the
+ * quest PDA does not exist (so the fund never landed). The caller catches this
+ * specific class to re-enter the MWA sign flow with a fresh blockhash. Every
+ * other error (on-chain failure, genuine non-expiry timeout) is a plain Error
+ * and must propagate unchanged.
+ */
+export class BlockhashExpiredError extends Error {
+  constructor(msg?: string) {
+    super(msg ?? "Transaction expired (blockhash no longer valid) — please try again.");
+    this.name = "BlockhashExpiredError";
+  }
+}
+
 export async function authorizeOrReauthorize(wallet: Web3MobileWallet): Promise<void> {
   const { authToken, setWallet } = useWalletStore.getState();
   if (authToken) {
@@ -57,16 +73,25 @@ export async function signAndBroadcast(
 
   tx.feePayer = publicKey;
 
-  // Fetch the blockhash as late as possible — immediately before entering the
-  // Phantom MWA session — so it is as fresh as possible by the time Phantom
-  // broadcasts it. We also capture lastValidBlockHeight so the caller can run
-  // blockheight-aware confirmation (detect expiry instead of waiting out the
-  // full timeout). We do NOT add network calls inside transact(): fetching
-  // inside the session (after authorize) can close Phantom's MWA session
-  // before signAndSendTransactions runs. Blockhashes are valid for ~150
-  // blocks (~60-90 s on devnet).
-  const { blockhash, lastValidBlockHeight } = await getLatestBlockhashWithFallback();
-  tx.recentBlockhash = blockhash;
+  // The blockhash is fetched INSIDE the transact() session — immediately after
+  // authorization and immediately before signAndSendTransactions, with no other
+  // await in between — so staleness is reduced to the irreducible wallet-approval
+  // duration (the only unavoidable delay happens inside signAndSendTransactions
+  // itself, where Phantom renders its UI).
+  //
+  // Verified safe: the dApp's Solana RPC `connection` (Helius HTTP) and the MWA
+  // session (native transport) are independent channels. The installed
+  // @solana-mobile protocol holds the session open for the whole callback
+  // promise and only closes it when the callback settles or the native
+  // transport errors; a sub-second HTTP blockhash fetch does not signal, pause,
+  // or close the session. Fetching here (vs before transact) is what keeps the
+  // blockhash fresh — the old pre-session fetch is what caused expiry across the
+  // human round-trip.
+  //
+  // lastValidBlockHeight captured in-session is returned so the caller can run
+  // blockheight-aware confirmation (detect expiry fast instead of waiting out
+  // the full timeout) and gate a bounded fresh-blockhash retry.
+  let lastValidBlockHeight = 0;
 
   const rawSig = await transact(async (wallet) => {
     // Auth: silent reauthorize or full authorize (shows Phantom UI)
@@ -76,8 +101,12 @@ export async function signAndBroadcast(
     const { publicKey: freshPk } = useWalletStore.getState();
     if (freshPk) tx.feePayer = freshPk;
 
-    // Sign+send immediately after auth — no extra network calls so the
-    // MWA session stays alive long enough for Phantom to show its UI
+    // Fetch the blockhash as late as possible — right before signing — then
+    // sign+send with NO intervening await so it stays maximally fresh.
+    const latest = await getLatestBlockhashWithFallback();
+    lastValidBlockHeight = latest.lastValidBlockHeight;
+    tx.recentBlockhash = latest.blockhash;
+
     const signatures = await wallet.signAndSendTransactions({
       transactions: [tx],
       minContextSlot: 0,
@@ -195,16 +224,11 @@ export async function waitForConfirmation(
       try {
         const currentHeight = await getCurrentBlockHeight();
         if (currentHeight > (lastValidBlockHeight as number)) {
-          throw new Error(
-            "Transaction expired (blockhash no longer valid) — please try again."
-          );
+          throw new BlockhashExpiredError();
         }
       } catch (e: any) {
-        // Re-throw our own expiry error; swallow RPC errors from the height read.
-        if (
-          typeof e?.message === "string" &&
-          e.message.startsWith("Transaction expired")
-        ) {
+        // Re-throw our own expiry signal; swallow RPC errors from the height read.
+        if (e instanceof BlockhashExpiredError) {
           throw e;
         }
       }

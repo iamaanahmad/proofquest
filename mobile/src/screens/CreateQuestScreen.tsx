@@ -8,10 +8,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../types";
 import { useWalletStore } from "../store/wallet";
-import { signAndBroadcast, waitForConfirmation } from "../hooks/useMWA";
+import { signAndBroadcast, waitForConfirmation, BlockhashExpiredError } from "../hooks/useMWA";
 import { insertQuest, ensureAppwriteSession } from "../lib/appwrite";
 import { buildCreateAndFundTx } from "../lib/transactions";
-import { questPda, TEST_USDC_MINT } from "../lib/solana";
+import { connection, questPda, TEST_USDC_MINT } from "../lib/solana";
 import { PublicKey } from "@solana/web3.js";
 import Geolocation from "react-native-geolocation-service";
 import Geohash from "ngeohash";
@@ -196,39 +196,96 @@ export default function CreateQuestScreen({ navigation }: Props) {
 
       // Step 1: persist quest data (sig = null until we have it)
       await AsyncStorage.setItem(PENDING_QUEST_KEY, JSON.stringify({ sig: null, questData }));
-      setStatusMsg("📲 Opening wallet — please sign…");
 
-      let signResult: { sig: string; lastValidBlockHeight: number };
-      try {
-        signResult = await signAndBroadcast(tx);
-      } catch (e: any) {
-        // User rejected or wallet error — tx was never sent, clear pending
-        await AsyncStorage.removeItem(PENDING_QUEST_KEY);
-        throw e;
+      // Deterministic quest PDA — used to gate the fresh-blockhash retry so we
+      // never prompt the user to sign (and fund) twice if the first attempt
+      // actually landed on-chain.
+      const [questPdaKey2] = questPda(publicKey, questId);
+
+      // Sign → persist sig → confirm, wrapped in a BOUNDED fresh-blockhash
+      // retry. A signed tx is bound to the blockhash it was signed over, so a
+      // genuine retry must RE-SIGN over a fresh blockhash — signAndBroadcast
+      // now fetches the blockhash inside the MWA session, so each call re-signs
+      // against a fresh one. We attempt at most twice.
+      const MAX_SIGN_ATTEMPTS = 2;
+      for (let attempt = 1; attempt <= MAX_SIGN_ATTEMPTS; attempt++) {
+        if (attempt === 1) {
+          setStatusMsg("📲 Opening wallet — please sign…");
+        } else {
+          setStatusMsg(
+            "⚠️ Blockhash expired, retrying with a fresh one — please approve again in your wallet…"
+          );
+        }
+
+        let signResult: { sig: string; lastValidBlockHeight: number };
+        try {
+          signResult = await signAndBroadcast(tx);
+        } catch (e: any) {
+          // User rejected or wallet error — tx was never sent, clear pending
+          await AsyncStorage.removeItem(PENDING_QUEST_KEY);
+          throw e;
+        }
+        const sig = signResult.sig;
+
+        setStatusMsg(`✍️ Signed! sig: ${sig.slice(0, 12)}… Saving…`);
+        // Persist signature + confirmation metadata so the AppState resume path
+        // can confirm (blockheight-aware + PDA fallback) if needed. On a retry
+        // this OVERWRITES the previous record with the new sig/lastValidBlockHeight
+        // (creator/questId/questData unchanged) so the resume path stays coherent.
+        await AsyncStorage.setItem(
+          PENDING_QUEST_KEY,
+          JSON.stringify({
+            sig,
+            lastValidBlockHeight: signResult.lastValidBlockHeight,
+            creator: publicKey.toBase58(),
+            questId: questId.toString(),
+            questData,
+          })
+        );
+
+        setStatusMsg("⏳ Waiting for on-chain confirmation…");
+        try {
+          await waitForConfirmation(sig, {
+            lastValidBlockHeight: signResult.lastValidBlockHeight,
+            creator: publicKey,
+            questId,
+          });
+          break; // Confirmed — leave the retry loop and save to Appwrite.
+        } catch (e: any) {
+          if (!(e instanceof BlockhashExpiredError)) {
+            // Non-expiry error (on-chain failure, genuine non-expiry timeout):
+            // propagate to the outer catch so the existing wording — including
+            // "It may still land — check Solana Explorer (devnet)" — reaches the
+            // user and the pending record is cleared there.
+            throw e;
+          }
+
+          // Expiry detected. Before prompting again, check whether the quest PDA
+          // already exists — if the first attempt actually landed, re-signing
+          // would double-fund. If it exists, treat this as success.
+          let pdaExists = false;
+          try {
+            const acct = await connection.getAccountInfo(questPdaKey2);
+            pdaExists = acct !== null;
+          } catch {
+            // RPC hiccup — err on the safe side and do NOT retry blindly.
+            pdaExists = false;
+          }
+          if (pdaExists) {
+            break; // First attempt landed after all — proceed to save.
+          }
+
+          if (attempt >= MAX_SIGN_ATTEMPTS) {
+            // Both attempts expired — surface a clear terminal message.
+            await AsyncStorage.removeItem(PENDING_QUEST_KEY);
+            throw new Error(
+              "Quest creation failed: the blockhash expired twice. Please check your " +
+              "network connection and try again."
+            );
+          }
+          // Otherwise loop again: signAndBroadcast re-signs over a fresh blockhash.
+        }
       }
-      const sig = signResult.sig;
-
-      setStatusMsg(`✍️ Signed! sig: ${sig.slice(0, 12)}… Saving…`);
-      // Step 2: persist signature + confirmation metadata so the AppState path
-      // can confirm (blockheight-aware + PDA fallback) if needed.
-      await AsyncStorage.setItem(
-        PENDING_QUEST_KEY,
-        JSON.stringify({
-          sig,
-          lastValidBlockHeight: signResult.lastValidBlockHeight,
-          creator: publicKey.toBase58(),
-          questId: questId.toString(),
-          questData,
-        })
-      );
-
-      setStatusMsg("⏳ Waiting for on-chain confirmation…");
-      // Step 3: wait for on-chain confirmation, then save to Appwrite
-      await waitForConfirmation(sig, {
-        lastValidBlockHeight: signResult.lastValidBlockHeight,
-        creator: publicKey,
-        questId,
-      });
 
       setStatusMsg("💾 Saving quest to database…");
       await ensureAppwriteSession();

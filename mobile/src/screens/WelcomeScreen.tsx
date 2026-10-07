@@ -1,90 +1,154 @@
 import React, { useState } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
-} from "react-native";
+import { View, Text, Pressable, StyleSheet, ActivityIndicator } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../types";
 import { useMWA } from "../hooks/useMWA";
 import { useWalletStore } from "../store/wallet";
+import { Screen, Icon, useFeedback } from "../ui";
+import { color, spacing, radius, typography } from "../theme/tokens";
 
 type Props = NativeStackScreenProps<RootStackParamList, "Welcome">;
 
 export default function WelcomeScreen({ navigation }: Props) {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState<"requester" | "worker" | null>(null);
   const { connect } = useMWA();
   const { setRole } = useWalletStore();
+  const { toast } = useFeedback();
 
   async function handleConnect(role: "requester" | "worker") {
-    setLoading(true);
+    setLoading(role);
     try {
       await connect();
       setRole(role);
       navigation.replace("Home");
     } catch (e: any) {
-      Alert.alert("Connection failed", e.message ?? "Wallet rejected");
+      const msg = e.message ?? "";
+      if (!msg.toLowerCase().includes("cancel") && !msg.toLowerCase().includes("reject")) {
+        toast({ message: msg || "Connection failed. Try again.", tone: "danger" });
+      }
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>ProofQuest</Text>
-      <Text style={styles.subtitle}>
-        Request trusted real-world evidence.{"\n"}Get paid when you prove it.
-      </Text>
+    <Screen>
+      <View style={styles.container}>
+        {/* Logo / wordmark */}
+        <View style={styles.brandWrap}>
+          <View style={styles.mark}>
+            <View style={styles.markInner} />
+          </View>
+          <Text style={styles.wordmark}>ProofQuest</Text>
+          <Text style={styles.subtitle}>
+            Real-world evidence on Solana.{"\n"}Verified. Trustless. Paid.
+          </Text>
+        </View>
 
-      {loading ? (
-        <ActivityIndicator size="large" color="#9945FF" />
-      ) : (
-        <>
-          <TouchableOpacity
-            style={[styles.btn, styles.btnPrimary]}
+        {/* Role selection */}
+        <View style={styles.roles}>
+          <RoleCard
+            icon={<Icon name="doc" size={26} color={color.primary} />}
+            title="I need proof"
+            desc="Post a quest, lock USDC in escrow, approve when satisfied."
+            accentColor={color.primary}
+            accentBg={color.primarySoft}
+            loading={loading === "requester"}
+            disabled={!!loading}
             onPress={() => handleConnect("requester")}
-          >
-            <Text style={styles.btnText}>I need something verified</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.btn, styles.btnSecondary]}
+          />
+          <RoleCard
+            icon={<Icon name="pin" size={26} color={color.success} />}
+            title="I'll go verify"
+            desc="Claim quests near you, capture evidence, earn USDC."
+            accentColor={color.success}
+            accentBg={color.successSoft}
+            loading={loading === "worker"}
+            disabled={!!loading}
             onPress={() => handleConnect("worker")}
-          >
-            <Text style={styles.btnText}>I'll go verify it</Text>
-          </TouchableOpacity>
-        </>
+          />
+        </View>
+
+        {/* Footer */}
+        <View style={styles.footer}>
+          <View style={styles.netBadge}>
+            <View style={[styles.netDot, { backgroundColor: color.success }]} />
+            <Text style={styles.netText}>Solana Devnet</Text>
+          </View>
+          <Text style={styles.footerNote}>Powered by MWA · Phantom / Solflare</Text>
+        </View>
+      </View>
+    </Screen>
+  );
+}
+
+function RoleCard({ icon, title, desc, accentColor, accentBg, loading, disabled, onPress }: any) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={`${title}: ${desc}`}
+      style={({ pressed }) => [
+        styles.card,
+        { borderColor: accentColor + "33" },
+        pressed && styles.cardPressed,
+        disabled && !loading && styles.cardDisabled,
+      ]}
+    >
+      <View style={[styles.cardIcon, { backgroundColor: accentBg }]}>{icon}</View>
+      <View style={styles.cardBody}>
+        <Text style={styles.cardTitle}>{title}</Text>
+        <Text style={styles.cardDesc}>{desc}</Text>
+      </View>
+      {loading ? (
+        <ActivityIndicator color={accentColor} size="small" />
+      ) : (
+        <Icon name="chevron-right" size={20} color={accentColor} />
       )}
-    </View>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0f0f23",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 32,
-    gap: 16,
+  container: { flex: 1, paddingHorizontal: spacing.xxl, justifyContent: "space-between", paddingVertical: spacing.xxl },
+
+  brandWrap: { alignItems: "center", marginTop: spacing.xxl },
+  mark: {
+    width: 80, height: 80, borderRadius: 22,
+    backgroundColor: color.primarySoft,
+    alignItems: "center", justifyContent: "center", marginBottom: spacing.lg,
   },
-  title: { fontSize: 36, fontWeight: "800", color: "#fff" },
-  subtitle: {
-    fontSize: 16,
-    color: "#aaa",
-    textAlign: "center",
-    marginBottom: 24,
+  markInner: {
+    width: 28, height: 28, borderRadius: 14,
+    borderWidth: 3, borderColor: color.primary, borderTopColor: color.success,
   },
-  btn: {
-    width: "100%",
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: "center",
+  wordmark: { ...typography.display, color: color.textPrimary },
+  subtitle: { ...typography.body, color: color.textMuted, textAlign: "center", marginTop: spacing.sm, lineHeight: 22 },
+
+  roles: { gap: spacing.md },
+  card: {
+    flexDirection: "row", alignItems: "center", gap: spacing.lg,
+    backgroundColor: color.surface, borderRadius: radius.lg, padding: spacing.lg,
+    borderWidth: 1,
   },
-  btnPrimary: { backgroundColor: "#9945FF" },
-  btnSecondary: { backgroundColor: "#14F195", marginTop: 8 },
-  btnText: { color: "#0f0f23", fontWeight: "700", fontSize: 16 },
+  cardPressed: { opacity: 0.85, transform: [{ scale: 0.995 }] },
+  cardDisabled: { opacity: 0.4 },
+  cardIcon: {
+    width: 52, height: 52, borderRadius: radius.md,
+    alignItems: "center", justifyContent: "center",
+  },
+  cardBody: { flex: 1, gap: 3 },
+  cardTitle: { ...typography.bodyStrong, color: color.textPrimary },
+  cardDesc: { ...typography.caption, color: color.textSecondary, lineHeight: 18 },
+
+  footer: { alignItems: "center", gap: spacing.sm },
+  netBadge: {
+    flexDirection: "row", alignItems: "center", gap: spacing.xs + 2,
+    backgroundColor: color.successSoft, borderRadius: radius.pill,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.xs + 1,
+  },
+  netDot: { width: 6, height: 6, borderRadius: 3 },
+  netText: { ...typography.caption, color: color.success, fontWeight: "700" },
+  footerNote: { ...typography.caption, color: color.textFaint },
 });

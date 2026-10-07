@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
-  View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, Alert, ActivityIndicator, StatusBar,
+  View, Text, TextInput, Pressable, ScrollView,
+  StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform,
   PermissionsAndroid, Linking, AppState, AppStateStatus,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../types";
 import { useWalletStore } from "../store/wallet";
@@ -17,11 +16,11 @@ import Geolocation from "react-native-geolocation-service";
 import Geohash from "ngeohash";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import "react-native-get-random-values";
+import { Screen, ScreenHeader, Button, Card, Icon, useFeedback } from "../ui";
+import { color, spacing, radius, typography } from "../theme/tokens";
 
 type Props = NativeStackScreenProps<RootStackParamList, "CreateQuest">;
 
-// Key used to persist a quest that was signed but not yet saved to Appwrite.
-// Survives the app being backgrounded/frozen during the Phantom interaction.
 const PENDING_QUEST_KEY = "pending_quest_v1";
 
 const TEMPLATES = [
@@ -34,45 +33,20 @@ const TEMPLATES = [
 async function getLocationWithPermission(): Promise<GeolocationPosition> {
   const granted = await PermissionsAndroid.request(
     PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-    {
-      title: "Location Permission",
-      message: "ProofQuest needs your location to tag this quest.",
-      buttonPositive: "Allow",
-      buttonNegative: "Deny",
-    }
+    { title: "Location permission", message: "ProofQuest needs your location to tag this quest.", buttonPositive: "Allow", buttonNegative: "Deny" }
   );
   if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
-    return new Promise((_, reject) => {
-      Alert.alert(
-        "Location Required",
-        "Location permission is needed to create a quest. Please enable it in app settings.",
-        [
-          { text: "Open Settings", onPress: () => { Linking.openSettings(); reject(new Error("Location permission denied")); } },
-          { text: "Cancel", style: "cancel", onPress: () => reject(new Error("Location permission denied")) },
-        ]
-      );
-    });
+    throw new Error("Location permission denied");
   }
   return new Promise<GeolocationPosition>((res, rej) =>
     Geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: false, timeout: 10000 })
   );
 }
 
-/**
- * Try to complete a pending quest: confirm the tx on-chain, save to Appwrite,
- * clear the pending record.
- */
 async function completePendingQuest(pending: Record<string, any>): Promise<void> {
-  // Backward-compat: older persisted records (written before these fields
-  // existed) lack lastValidBlockHeight/creator/questId. Missing fields simply
-  // disable that check, falling back to signature-status polling.
-  const lastValidBlockHeight =
-    typeof pending.lastValidBlockHeight === "number"
-      ? pending.lastValidBlockHeight
-      : undefined;
+  const lastValidBlockHeight = typeof pending.lastValidBlockHeight === "number" ? pending.lastValidBlockHeight : undefined;
   const creator = pending.creator ? new PublicKey(pending.creator) : undefined;
   const questId = pending.questId ? BigInt(pending.questId) : undefined;
-
   await waitForConfirmation(pending.sig, { lastValidBlockHeight, creator, questId });
   await ensureAppwriteSession();
   await insertQuest(pending.questData);
@@ -81,6 +55,7 @@ async function completePendingQuest(pending: Record<string, any>): Promise<void>
 
 export default function CreateQuestScreen({ navigation }: Props) {
   const { publicKey } = useWalletStore();
+  const { alert } = useFeedback();
   const [templateIdx, setTemplateIdx] = useState(0);
   const [title, setTitle] = useState(TEMPLATES[0].label);
   const [description, setDescription] = useState(TEMPLATES[0].description);
@@ -88,80 +63,49 @@ export default function CreateQuestScreen({ navigation }: Props) {
   const [claimMins, setClaimMins] = useState("60");
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
-
-  // Track whether we're already processing a resume to avoid duplicate runs
   const resumingRef = useRef(false);
 
-  /**
-   * Called whenever the app comes to the foreground.
-   * Checks AsyncStorage for a pending quest and tries to complete it.
-   */
   async function tryResumePendingQuest() {
     if (resumingRef.current) return;
     const raw = await AsyncStorage.getItem(PENDING_QUEST_KEY);
     if (!raw) return;
-
     let pending: Record<string, any>;
-    try {
-      pending = JSON.parse(raw);
-    } catch {
-      await AsyncStorage.removeItem(PENDING_QUEST_KEY);
-      return;
-    }
-
-    // If sig is null, the wallet interaction didn't finish — skip
-    if (!pending.sig) {
-      setStatusMsg("⚠️ Pending quest has no signature yet");
-      return;
-    }
-
+    try { pending = JSON.parse(raw); } catch { await AsyncStorage.removeItem(PENDING_QUEST_KEY); return; }
+    if (!pending.sig) { setStatusMsg("Pending quest has no signature yet."); return; }
     resumingRef.current = true;
     setLoading(true);
-    setStatusMsg("🔄 Resuming: confirming transaction…");
+    setStatusMsg("Resuming — confirming transaction…");
     try {
       await completePendingQuest(pending);
-      setStatusMsg("✅ Quest confirmed and saved!");
-      Alert.alert(
-        "Quest Published",
-        `${(pending.questData.reward_amount / 1_000_000).toFixed(2)} USDC locked in escrow. Workers nearby can now claim it.`,
-        [{ text: "View Quests", onPress: () => navigation.replace("Home") }]
-      );
+      setStatusMsg("Quest confirmed and saved!");
+      await alert({ title: "Quest published", message: `${(pending.questData.reward_amount / 1_000_000).toFixed(2)} USDC locked in escrow. Workers nearby can now claim it.`, tone: "success", confirmLabel: "View quests" });
+      navigation.replace("Home");
     } catch (e: any) {
       await AsyncStorage.removeItem(PENDING_QUEST_KEY);
       const msg = e?.message ?? String(e);
-      setStatusMsg(`❌ Resume failed: ${msg}`);
-      Alert.alert("Quest creation failed", msg);
+      setStatusMsg(msg);
+      await alert({ title: "Quest creation failed", message: msg, tone: "danger" });
     } finally {
       resumingRef.current = false;
       setLoading(false);
     }
   }
 
-  // On mount: check for any quest that was left pending from a previous session
+  useEffect(() => { tryResumePendingQuest(); }, []);
   useEffect(() => {
-    tryResumePendingQuest();
-  }, []);
-
-  // On foreground resume: check again (handles the case where the JS thread
-  // was suspended while Phantom was open and resumes when we come back)
-  useEffect(() => {
-    const sub = AppState.addEventListener("change", (state: AppStateStatus) => {
-      if (state === "active") {
-        tryResumePendingQuest();
-      }
-    });
+    const sub = AppState.addEventListener("change", (s: AppStateStatus) => { if (s === "active") tryResumePendingQuest(); });
     return () => sub.remove();
   }, []);
 
   async function handleCreate() {
-    if (!publicKey) { Alert.alert("Wallet not connected"); return; }
-    if (!title.trim()) { Alert.alert("Title required"); return; }
+    if (!publicKey) { await alert({ title: "Wallet not connected", tone: "warning" }); return; }
+    if (!title.trim()) { await alert({ title: "Title required", tone: "warning" }); return; }
     const reward = Math.round(parseFloat(rewardUsdc) * 1_000_000);
-    if (isNaN(reward) || reward <= 0) { Alert.alert("Invalid reward amount"); return; }
+    if (isNaN(reward) || reward <= 0) { await alert({ title: "Invalid reward", message: "Enter a positive USDC amount.", tone: "warning" }); return; }
 
     setLoading(true);
     try {
-      setStatusMsg("📍 Getting location…");
+      setStatusMsg("Getting location…");
       const pos = await getLocationWithPermission();
       const geohash = Geohash.encode(pos.coords.latitude, pos.coords.longitude, 4);
       const now = Math.floor(Date.now() / 1000);
@@ -189,122 +133,55 @@ export default function CreateQuestScreen({ navigation }: Props) {
         created_at: new Date().toISOString(),
       };
 
-      setStatusMsg("🔨 Building transaction…");
-      const tx = await buildCreateAndFundTx(
-        publicKey, questId, reward, claimDeadline, submitDeadline, geohash, template.schemaHash
-      );
-
-      // Step 1: persist quest data (sig = null until we have it)
+      setStatusMsg("Building transaction…");
+      const tx = await buildCreateAndFundTx(publicKey, questId, reward, claimDeadline, submitDeadline, geohash, template.schemaHash);
       await AsyncStorage.setItem(PENDING_QUEST_KEY, JSON.stringify({ sig: null, questData }));
-
-      // Deterministic quest PDA — used to gate the fresh-blockhash retry so we
-      // never prompt the user to sign (and fund) twice if the first attempt
-      // actually landed on-chain.
       const [questPdaKey2] = questPda(publicKey, questId);
 
-      // Sign → persist sig → confirm, wrapped in a BOUNDED fresh-blockhash
-      // retry. A signed tx is bound to the blockhash it was signed over, so a
-      // genuine retry must RE-SIGN over a fresh blockhash — signAndBroadcast
-      // now fetches the blockhash inside the MWA session, so each call re-signs
-      // against a fresh one. We attempt at most twice.
       const MAX_SIGN_ATTEMPTS = 2;
       for (let attempt = 1; attempt <= MAX_SIGN_ATTEMPTS; attempt++) {
-        if (attempt === 1) {
-          setStatusMsg("📲 Opening wallet — please sign…");
-        } else {
-          setStatusMsg(
-            "⚠️ Blockhash expired, retrying with a fresh one — please approve again in your wallet…"
-          );
-        }
+        setStatusMsg(attempt === 1 ? "Opening wallet — please sign…" : "Blockhash expired — retrying, please approve again…");
 
         let signResult: { sig: string; lastValidBlockHeight: number };
         try {
           signResult = await signAndBroadcast(tx);
         } catch (e: any) {
-          // User rejected or wallet error — tx was never sent, clear pending
           await AsyncStorage.removeItem(PENDING_QUEST_KEY);
           throw e;
         }
         const sig = signResult.sig;
+        setStatusMsg(`Signed! Confirming…`);
+        await AsyncStorage.setItem(PENDING_QUEST_KEY, JSON.stringify({ sig, lastValidBlockHeight: signResult.lastValidBlockHeight, creator: publicKey.toBase58(), questId: questId.toString(), questData }));
 
-        setStatusMsg(`✍️ Signed! sig: ${sig.slice(0, 12)}… Saving…`);
-        // Persist signature + confirmation metadata so the AppState resume path
-        // can confirm (blockheight-aware + PDA fallback) if needed. On a retry
-        // this OVERWRITES the previous record with the new sig/lastValidBlockHeight
-        // (creator/questId/questData unchanged) so the resume path stays coherent.
-        await AsyncStorage.setItem(
-          PENDING_QUEST_KEY,
-          JSON.stringify({
-            sig,
-            lastValidBlockHeight: signResult.lastValidBlockHeight,
-            creator: publicKey.toBase58(),
-            questId: questId.toString(),
-            questData,
-          })
-        );
-
-        setStatusMsg("⏳ Waiting for on-chain confirmation…");
+        setStatusMsg("Waiting for on-chain confirmation…");
         try {
-          await waitForConfirmation(sig, {
-            lastValidBlockHeight: signResult.lastValidBlockHeight,
-            creator: publicKey,
-            questId,
-          });
-          break; // Confirmed — leave the retry loop and save to Appwrite.
+          await waitForConfirmation(sig, { lastValidBlockHeight: signResult.lastValidBlockHeight, creator: publicKey, questId });
+          break;
         } catch (e: any) {
-          if (!(e instanceof BlockhashExpiredError)) {
-            // Non-expiry error (on-chain failure, genuine non-expiry timeout):
-            // propagate to the outer catch so the existing wording — including
-            // "It may still land — check Solana Explorer (devnet)" — reaches the
-            // user and the pending record is cleared there.
-            throw e;
-          }
-
-          // Expiry detected. Before prompting again, check whether the quest PDA
-          // already exists — if the first attempt actually landed, re-signing
-          // would double-fund. If it exists, treat this as success.
+          if (!(e instanceof BlockhashExpiredError)) throw e;
           let pdaExists = false;
-          try {
-            const acct = await connection.getAccountInfo(questPdaKey2);
-            pdaExists = acct !== null;
-          } catch {
-            // RPC hiccup — err on the safe side and do NOT retry blindly.
-            pdaExists = false;
-          }
-          if (pdaExists) {
-            break; // First attempt landed after all — proceed to save.
-          }
-
+          try { pdaExists = !!(await connection.getAccountInfo(questPdaKey2)); } catch {}
+          if (pdaExists) break;
           if (attempt >= MAX_SIGN_ATTEMPTS) {
-            // Both attempts expired — surface a clear terminal message.
             await AsyncStorage.removeItem(PENDING_QUEST_KEY);
-            throw new Error(
-              "Quest creation failed: the blockhash expired twice. Please check your " +
-              "network connection and try again."
-            );
+            throw new Error("The blockhash expired twice. Check your connection and try again.");
           }
-          // Otherwise loop again: signAndBroadcast re-signs over a fresh blockhash.
         }
       }
 
-      setStatusMsg("💾 Saving quest to database…");
+      setStatusMsg("Saving quest…");
       await ensureAppwriteSession();
       await insertQuest(questData);
       await AsyncStorage.removeItem(PENDING_QUEST_KEY);
-      setStatusMsg("✅ Quest published!");
+      setStatusMsg("Quest published!");
 
-      Alert.alert(
-        "Quest Published",
-        `${(reward / 1_000_000).toFixed(2)} USDC locked in escrow. Workers nearby can now claim it.`,
-        [{ text: "View Quests", onPress: () => navigation.replace("Home") }]
-      );
+      await alert({ title: "Quest published", message: `${(reward / 1_000_000).toFixed(2)} USDC locked in escrow. Workers nearby can now claim it.`, tone: "success", confirmLabel: "View quests" });
+      navigation.replace("Home");
     } catch (e: any) {
       const msg = e?.message ?? String(e);
-      setStatusMsg(`❌ Error: ${msg}`);
-      // "Location permission denied" already shows its own Alert (with Settings
-      // button) via getLocationWithPermission — don't double-alert for it.
+      setStatusMsg(msg);
       if (msg !== "Location permission denied") {
-        Alert.alert("Failed to create quest", msg || "Unknown error");
+        await alert({ title: "Failed to create quest", message: msg, tone: "danger" });
       }
     } finally {
       setLoading(false);
@@ -312,112 +189,80 @@ export default function CreateQuestScreen({ navigation }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
-      <StatusBar barStyle="light-content" backgroundColor="#080818" />
-
-      <View style={styles.navbar}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Text style={styles.navBack}>‹ Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.navTitle}>New Quest</Text>
-        <View style={{ width: 60 }} />
-      </View>
-
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+    <Screen>
+      <ScreenHeader title="New Quest" onBack={() => navigation.goBack()} />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={0}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+        >
 
         <Text style={styles.sectionLabel}>TEMPLATE</Text>
         <View style={styles.templateGrid}>
-          {TEMPLATES.map((t, i) => (
-            <TouchableOpacity
-              key={t.id}
-              style={[styles.templateCard, i === templateIdx && styles.templateCardActive]}
-              onPress={() => {
-                setTemplateIdx(i);
-                if (i !== 3) { setTitle(t.label); setDescription(t.description); }
-                else { setTitle(""); setDescription(""); }
-              }}
-            >
-              <View style={[styles.templateDot, i === templateIdx && styles.templateDotActive]} />
-              <Text style={[styles.templateLabel, i === templateIdx && styles.templateLabelActive]} numberOfLines={2}>
-                {t.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          {TEMPLATES.map((t, i) => {
+            const active = i === templateIdx;
+            return (
+              <Pressable
+                key={t.id}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={t.label}
+                onPress={() => {
+                  setTemplateIdx(i);
+                  if (i !== 3) { setTitle(t.label); setDescription(t.description); }
+                  else { setTitle(""); setDescription(""); }
+                }}
+                style={({ pressed }) => [styles.tplCard, active && styles.tplCardActive, pressed && styles.tplPressed]}
+              >
+                <View style={[styles.tplRadio, active && styles.tplRadioActive]}>
+                  {active && <View style={styles.tplRadioDot} />}
+                </View>
+                <Text style={[styles.tplLabel, active && styles.tplLabelActive]} numberOfLines={2}>{t.label}</Text>
+              </Pressable>
+            );
+          })}
         </View>
 
         <Text style={styles.sectionLabel}>TITLE</Text>
-        <TextInput
-          style={styles.input}
-          value={title}
-          onChangeText={setTitle}
-          placeholder="What needs verifying?"
-          placeholderTextColor="#333"
-        />
+        <TextInput style={styles.input} value={title} onChangeText={setTitle} placeholder="What needs verifying?" placeholderTextColor={color.textFaint} accessibilityLabel="Quest title" />
 
         <Text style={styles.sectionLabel}>DESCRIPTION</Text>
-        <TextInput
-          style={[styles.input, styles.inputMulti]}
-          value={description}
-          onChangeText={setDescription}
-          multiline
-          placeholder="Describe exactly what evidence is needed…"
-          placeholderTextColor="#333"
-        />
+        <TextInput style={[styles.input, styles.inputMulti]} value={description} onChangeText={setDescription} multiline placeholder="Describe exactly what evidence is needed…" placeholderTextColor={color.textFaint} accessibilityLabel="Quest description" />
 
         <View style={styles.row}>
           <View style={styles.rowItem}>
             <Text style={styles.sectionLabel}>REWARD (USDC)</Text>
             <View style={styles.inputRow}>
-              <Text style={styles.inputPrefix}>$</Text>
-              <TextInput
-                style={[styles.input, styles.inputInline]}
-                value={rewardUsdc}
-                onChangeText={setRewardUsdc}
-                keyboardType="decimal-pad"
-                placeholderTextColor="#333"
-              />
+              <Icon name="coin" size={18} color={color.success} />
+              <TextInput style={[styles.input, styles.inputInline]} value={rewardUsdc} onChangeText={setRewardUsdc} keyboardType="decimal-pad" placeholderTextColor={color.textFaint} accessibilityLabel="Reward amount in USDC" />
             </View>
           </View>
           <View style={styles.rowItem}>
             <Text style={styles.sectionLabel}>CLAIM WINDOW</Text>
             <View style={styles.inputRow}>
-              <TextInput
-                style={[styles.input, styles.inputInline]}
-                value={claimMins}
-                onChangeText={setClaimMins}
-                keyboardType="number-pad"
-                placeholderTextColor="#333"
-              />
+              <Icon name="clock" size={18} color={color.textMuted} />
+              <TextInput style={[styles.input, styles.inputInline]} value={claimMins} onChangeText={setClaimMins} keyboardType="number-pad" placeholderTextColor={color.textFaint} accessibilityLabel="Claim window in minutes" />
               <Text style={styles.inputSuffix}>min</Text>
             </View>
           </View>
         </View>
 
-        <View style={styles.notice}>
-          <View style={styles.lockIcon}>
-            <View style={styles.lockBody} />
-            <View style={styles.lockShackle} />
+        <Card style={styles.escrowNotice}>
+          <View style={styles.escrowRow}>
+            <Icon name="lock" size={20} color={color.textMuted} />
+            <Text style={styles.escrowText}>
+              {rewardUsdc || "0"} USDC will be locked in on-chain escrow until you approve the evidence. Devnet only.
+            </Text>
           </View>
-          <Text style={styles.noticeText}>
-            {rewardUsdc || "0"} USDC will be locked in on-chain escrow until you approve the evidence. Devnet only.
-          </Text>
-        </View>
+        </Card>
 
-        <TouchableOpacity
-          style={[styles.submitBtn, loading && styles.submitBtnDisabled]}
-          onPress={handleCreate}
-          disabled={loading}
-          activeOpacity={0.8}
-        >
-          {loading ? (
-            <View style={styles.submitLoading}>
-              <ActivityIndicator color="#080818" size="small" />
-              <Text style={styles.submitBtnText}>Publishing…</Text>
-            </View>
-          ) : (
-            <Text style={styles.submitBtnText}>Fund & Publish Quest</Text>
-          )}
-        </TouchableOpacity>
+        <Button label={loading ? "Publishing…" : "Fund & publish quest"} variant="primary" loading={loading} disabled={loading} onPress={handleCreate} />
 
         {statusMsg ? (
           <View style={styles.statusBox}>
@@ -425,70 +270,50 @@ export default function CreateQuestScreen({ navigation }: Props) {
           </View>
         ) : null}
 
-      </ScrollView>
-    </SafeAreaView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#080818" },
-  navbar: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
-    paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: "#111128",
-  },
-  navBack: { color: "#9945FF", fontWeight: "700", fontSize: 17 },
-  navTitle: { color: "#fff", fontWeight: "800", fontSize: 17 },
+  content: { padding: spacing.xl, paddingBottom: spacing.huge, gap: spacing.sm },
+  sectionLabel: { ...typography.overline, color: color.textMuted, marginTop: spacing.lg },
 
-  content: { padding: 20, paddingBottom: 48 },
-  sectionLabel: { color: "#444", fontSize: 11, fontWeight: "700", letterSpacing: 1, marginBottom: 8, marginTop: 20 },
-
-  templateGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  templateCard: {
-    width: "47%", backgroundColor: "#0e0e24", borderRadius: 14, padding: 14,
-    borderWidth: 1, borderColor: "#1a1a3e", gap: 8,
+  templateGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  tplCard: {
+    width: "47%", backgroundColor: color.surface, borderRadius: radius.md, padding: spacing.lg,
+    borderWidth: 1, borderColor: color.border, gap: spacing.sm,
   },
-  templateCardActive: { borderColor: "#9945FF", backgroundColor: "#9945FF11" },
-  templateDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#222" },
-  templateDotActive: { backgroundColor: "#9945FF" },
-  templateLabel: { color: "#555", fontSize: 12, lineHeight: 16 },
-  templateLabelActive: { color: "#fff", fontWeight: "700" },
+  tplCardActive: { borderColor: color.primary, backgroundColor: color.primarySoft },
+  tplPressed: { opacity: 0.85 },
+  tplRadio: {
+    width: 18, height: 18, borderRadius: 9, borderWidth: 2, borderColor: color.border,
+    alignItems: "center", justifyContent: "center",
+  },
+  tplRadioActive: { borderColor: color.primary },
+  tplRadioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: color.primary },
+  tplLabel: { ...typography.caption, color: color.textMuted },
+  tplLabelActive: { color: color.textPrimary, fontWeight: "700" },
 
   input: {
-    backgroundColor: "#0e0e24", color: "#fff", borderRadius: 12,
-    padding: 14, fontSize: 15, borderWidth: 1, borderColor: "#1a1a3e",
+    backgroundColor: color.surface, color: color.textPrimary, borderRadius: radius.md,
+    padding: spacing.lg, ...typography.body, borderWidth: 1, borderColor: color.border,
   },
   inputMulti: { height: 90, textAlignVertical: "top" },
-  row: { flexDirection: "row", gap: 12 },
+  row: { flexDirection: "row", gap: spacing.md, marginTop: spacing.lg },
   rowItem: { flex: 1 },
-  inputRow: { flexDirection: "row", alignItems: "center" },
-  inputPrefix: { color: "#555", fontSize: 16, marginRight: 6 },
-  inputSuffix: { color: "#555", fontSize: 13, marginLeft: 6 },
+  inputRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   inputInline: { flex: 1 },
+  inputSuffix: { ...typography.label, color: color.textMuted },
 
-  notice: {
-    flexDirection: "row", gap: 12, alignItems: "center", backgroundColor: "#0e0e24",
-    borderRadius: 12, padding: 14, marginTop: 20, borderWidth: 1, borderColor: "#1a1a3e",
-  },
-  lockIcon: { width: 18, height: 20, alignItems: "center" },
-  lockBody: { width: 14, height: 10, borderRadius: 3, backgroundColor: "#555", marginTop: 6 },
-  lockShackle: {
-    width: 10, height: 8, borderRadius: 5,
-    borderWidth: 2, borderColor: "#555", borderBottomWidth: 0,
-    position: "absolute", top: 0,
-  },
-  noticeText: { color: "#555", fontSize: 13, flex: 1, lineHeight: 18 },
-
-  submitBtn: {
-    backgroundColor: "#9945FF", borderRadius: 14, paddingVertical: 16,
-    alignItems: "center", marginTop: 24,
-  },
-  submitBtnDisabled: { opacity: 0.6 },
-  submitLoading: { flexDirection: "row", alignItems: "center", gap: 8 },
-  submitBtnText: { color: "#fff", fontWeight: "800", fontSize: 16 },
+  escrowNotice: { marginTop: spacing.xl },
+  escrowRow: { flexDirection: "row", gap: spacing.md, alignItems: "center" },
+  escrowText: { ...typography.caption, color: color.textSecondary, flex: 1, lineHeight: 18 },
 
   statusBox: {
-    marginTop: 16, backgroundColor: "#0e0e24", borderRadius: 10,
-    padding: 12, borderWidth: 1, borderColor: "#1a1a3e",
+    backgroundColor: color.surfaceAlt, borderRadius: radius.md,
+    padding: spacing.md, borderWidth: 1, borderColor: color.border,
   },
-  statusText: { color: "#aaa", fontSize: 12, fontFamily: "monospace", lineHeight: 18 },
+  statusText: { ...typography.caption, color: color.textSecondary, fontFamily: "monospace", lineHeight: 18 },
 });

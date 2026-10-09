@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { View, Text, ScrollView, Image, StyleSheet, ActivityIndicator } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import type { RootStackParamList } from "../types";
-import { getManifest, getEvidencePreviewUrl } from "../lib/appwrite";
+import { getManifest, getEvidencePreviewUrl, ensureAppwriteSession } from "../lib/appwrite";
 import { sha256, toHex } from "../lib/manifest";
 import { Screen, ScreenHeader, Card, Button, Icon } from "../ui";
 import { color, spacing, radius, typography } from "../theme/tokens";
@@ -15,16 +15,23 @@ export default function ReviewScreen({ route, navigation }: Props) {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [hashMatch, setHashMatch] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
+        await ensureAppwriteSession();
         const doc = await getManifest(questPublicKey);
-        if (!doc) return;
+        if (!doc) {
+          setLoading(false);
+          return;
+        }
         const parsed = JSON.parse(doc.manifest);
         setManifest(parsed);
         setHashMatch(toHex(sha256(doc.manifest)) === doc.manifest_hash);
         if (parsed.storageObjectId) setImageUrl(getEvidencePreviewUrl(parsed.storageObjectId));
+      } catch (e: any) {
+        setLoadError(e?.message ?? "Failed to load proof");
       } finally {
         setLoading(false);
       }
@@ -39,6 +46,20 @@ export default function ReviewScreen({ route, navigation }: Props) {
         <View style={styles.center}>
           <ActivityIndicator color={color.primary} size="large" />
           <Text style={styles.loadingText}>Loading proof packet…</Text>
+        </View>
+      </Screen>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Screen>
+        <ScreenHeader title="Proof packet" onBack={() => navigation.goBack()} />
+        <View style={styles.center}>
+          <Icon name="alert" size={40} color={color.danger} />
+          <Text style={styles.emptyText}>Failed to load proof</Text>
+          <Text style={[styles.loadingText, { textAlign: "center", paddingHorizontal: 24 }]}>{loadError}</Text>
+          <Button label="Go back" variant="secondary" onPress={() => navigation.goBack()} />
         </View>
       </Screen>
     );

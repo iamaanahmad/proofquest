@@ -1,5 +1,13 @@
-# Docs (private)
-docs/
+# Docs — keep architecture visible to judges; keep internal planning private
+docs/Delivery.md
+docs/P-R-D.md
+docs/RESEARCH.md
+docs/Verdict.md
+
+# iOS — Android-only project, keep ios directory off the repo
+mobile/ios/
+mobile/Gemfile
+mobile/Gemfile.lock
 
 # Anchor / Rust
 program/target/

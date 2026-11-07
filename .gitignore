@@ -1,0 +1,27 @@
+# Docs (private)
+docs/
+
+# Anchor / Rust
+program/target/
+program/.anchor/
+**/*.rs.bk
+
+# Node
+node_modules/
+
+# React Native build artifacts
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/android/.kotlin/
+
+# Env
+.env
+.env.*
+!.env.example
+!mobile/.env.example
+
+# Misc
+.DS_Store
+*.log

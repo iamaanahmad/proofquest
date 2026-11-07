@@ -1,0 +1,858 @@
+{
+  "address": "DmSc562EUuh9yvu2AmEupLLC8wQrXZGVSCZL61EpugvZ",
+  "metadata": {
+    "name": "proof_quest",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "ProofQuest escrow program"
+  },
+  "instructions": [
+    {
+      "name": "approve_and_release",
+      "docs": [
+        "Creator approves the evidence and releases the reward to the worker."
+      ],
+      "discriminator": [
+        63,
+        254,
+        154,
+        45,
+        149,
+        32,
+        80,
+        236
+      ],
+      "accounts": [
+        {
+          "name": "quest",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quest.creator",
+                "account": "Quest"
+              },
+              {
+                "kind": "account",
+                "path": "quest.quest_id",
+                "account": "Quest"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quest.creator",
+                "account": "Quest"
+              },
+              {
+                "kind": "account",
+                "path": "quest.quest_id",
+                "account": "Quest"
+              }
+            ]
+          }
+        },
+        {
+          "name": "worker_token_account",
+          "writable": true
+        },
+        {
+          "name": "creator",
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "cancel_unclaimed",
+      "docs": [
+        "Creator cancels an open (unclaimed) quest and recovers the vault funds."
+      ],
+      "discriminator": [
+        91,
+        226,
+        177,
+        147,
+        31,
+        139,
+        23,
+        243
+      ],
+      "accounts": [
+        {
+          "name": "quest",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quest.creator",
+                "account": "Quest"
+              },
+              {
+                "kind": "account",
+                "path": "quest.quest_id",
+                "account": "Quest"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quest.creator",
+                "account": "Quest"
+              },
+              {
+                "kind": "account",
+                "path": "quest.quest_id",
+                "account": "Quest"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator_token_account",
+          "writable": true
+        },
+        {
+          "name": "creator",
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_quest",
+      "docs": [
+        "Worker claims an open quest, locking it to their wallet."
+      ],
+      "discriminator": [
+        38,
+        197,
+        33,
+        123,
+        0,
+        108,
+        206,
+        161
+      ],
+      "accounts": [
+        {
+          "name": "quest",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quest.creator",
+                "account": "Quest"
+              },
+              {
+                "kind": "account",
+                "path": "quest.quest_id",
+                "account": "Quest"
+              }
+            ]
+          }
+        },
+        {
+          "name": "worker",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_and_fund_quest",
+      "docs": [
+        "Creator creates a quest account and funds the SPL token vault in one tx."
+      ],
+      "discriminator": [
+        197,
+        82,
+        187,
+        214,
+        122,
+        231,
+        160,
+        71
+      ],
+      "accounts": [
+        {
+          "name": "quest",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "creator"
+              },
+              {
+                "kind": "arg",
+                "path": "quest_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "creator"
+              },
+              {
+                "kind": "arg",
+                "path": "quest_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator_token_account",
+          "writable": true
+        },
+        {
+          "name": "mint"
+        },
+        {
+          "name": "creator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "quest_id",
+          "type": "u64"
+        },
+        {
+          "name": "reward_amount",
+          "type": "u64"
+        },
+        {
+          "name": "claim_deadline",
+          "type": "i64"
+        },
+        {
+          "name": "submit_deadline",
+          "type": "i64"
+        },
+        {
+          "name": "coarse_geohash",
+          "type": {
+            "array": [
+              "u8",
+              6
+            ]
+          }
+        },
+        {
+          "name": "evidence_schema_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "refund_expired",
+      "docs": [
+        "Anyone can trigger a refund after submit_deadline passes without approval."
+      ],
+      "discriminator": [
+        118,
+        153,
+        164,
+        244,
+        40,
+        128,
+        242,
+        250
+      ],
+      "accounts": [
+        {
+          "name": "quest",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quest.creator",
+                "account": "Quest"
+              },
+              {
+                "kind": "account",
+                "path": "quest.quest_id",
+                "account": "Quest"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quest.creator",
+                "account": "Quest"
+              },
+              {
+                "kind": "account",
+                "path": "quest.quest_id",
+                "account": "Quest"
+              }
+            ]
+          }
+        },
+        {
+          "name": "creator_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "submit_evidence_hash",
+      "docs": [
+        "Worker submits the 32-byte SHA-256 manifest digest on-chain."
+      ],
+      "discriminator": [
+        121,
+        240,
+        109,
+        119,
+        20,
+        76,
+        226,
+        187
+      ],
+      "accounts": [
+        {
+          "name": "quest",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  113,
+                  117,
+                  101,
+                  115,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quest.creator",
+                "account": "Quest"
+              },
+              {
+                "kind": "account",
+                "path": "quest.quest_id",
+                "account": "Quest"
+              }
+            ]
+          }
+        },
+        {
+          "name": "worker",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "manifest_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Quest",
+      "discriminator": [
+        68,
+        78,
+        51,
+        23,
+        204,
+        27,
+        76,
+        132
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "EvidenceSubmitted",
+      "discriminator": [
+        13,
+        123,
+        197,
+        44,
+        231,
+        117,
+        168,
+        53
+      ]
+    },
+    {
+      "name": "QuestApproved",
+      "discriminator": [
+        195,
+        200,
+        58,
+        6,
+        187,
+        185,
+        224,
+        190
+      ]
+    },
+    {
+      "name": "QuestClaimed",
+      "discriminator": [
+        49,
+        134,
+        11,
+        29,
+        35,
+        182,
+        38,
+        197
+      ]
+    },
+    {
+      "name": "QuestCreated",
+      "discriminator": [
+        179,
+        90,
+        201,
+        178,
+        90,
+        69,
+        73,
+        67
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "ZeroReward",
+      "msg": "Reward must be greater than zero"
+    },
+    {
+      "code": 6001,
+      "name": "DeadlineInPast",
+      "msg": "Deadline must be in the future"
+    },
+    {
+      "code": 6002,
+      "name": "BadDeadlineOrder",
+      "msg": "Submit deadline must be after claim deadline"
+    },
+    {
+      "code": 6003,
+      "name": "NotOpen",
+      "msg": "Quest is not open"
+    },
+    {
+      "code": 6004,
+      "name": "ClaimExpired",
+      "msg": "Claim deadline has passed"
+    },
+    {
+      "code": 6005,
+      "name": "CreatorCannotClaim",
+      "msg": "Creator cannot claim their own quest"
+    },
+    {
+      "code": 6006,
+      "name": "NotClaimed",
+      "msg": "Quest is not in Claimed state"
+    },
+    {
+      "code": 6007,
+      "name": "NotWorker",
+      "msg": "Signer is not the assigned worker"
+    },
+    {
+      "code": 6008,
+      "name": "SubmitExpired",
+      "msg": "Submit deadline has passed"
+    },
+    {
+      "code": 6009,
+      "name": "AlreadySubmitted",
+      "msg": "Evidence already submitted"
+    },
+    {
+      "code": 6010,
+      "name": "NotSubmitted",
+      "msg": "Quest is not in Submitted state"
+    },
+    {
+      "code": 6011,
+      "name": "NotCreator",
+      "msg": "Signer is not the quest creator"
+    },
+    {
+      "code": 6012,
+      "name": "NotExpired",
+      "msg": "Quest has not expired yet"
+    }
+  ],
+  "types": [
+    {
+      "name": "EvidenceSubmitted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quest",
+            "type": "pubkey"
+          },
+          {
+            "name": "worker",
+            "type": "pubkey"
+          },
+          {
+            "name": "manifest_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Quest",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "version",
+            "type": "u8"
+          },
+          {
+            "name": "quest_id",
+            "type": "u64"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "worker",
+            "type": {
+              "option": "pubkey"
+            }
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_amount",
+            "type": "u64"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "QuestStatus"
+              }
+            }
+          },
+          {
+            "name": "created_at",
+            "type": "i64"
+          },
+          {
+            "name": "claim_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "submit_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "coarse_geohash",
+            "type": {
+              "array": [
+                "u8",
+                6
+              ]
+            }
+          },
+          {
+            "name": "evidence_schema_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "evidence_manifest_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "submitted_at",
+            "type": {
+              "option": "i64"
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "vault_bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuestApproved",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quest",
+            "type": "pubkey"
+          },
+          {
+            "name": "worker",
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuestClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quest",
+            "type": "pubkey"
+          },
+          {
+            "name": "worker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuestCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "quest",
+            "type": "pubkey"
+          },
+          {
+            "name": "creator",
+            "type": "pubkey"
+          },
+          {
+            "name": "reward_amount",
+            "type": "u64"
+          },
+          {
+            "name": "claim_deadline",
+            "type": "i64"
+          },
+          {
+            "name": "submit_deadline",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuestStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Claimed"
+          },
+          {
+            "name": "Submitted"
+          },
+          {
+            "name": "Approved"
+          },
+          {
+            "name": "Cancelled"
+          },
+          {
+            "name": "Refunded"
+          }
+        ]
+      }
+    }
+  ]
+}

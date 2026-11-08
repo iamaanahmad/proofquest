@@ -239,10 +239,10 @@ proofquest/
 
 ## Releases
 
-| Version | Notes |
-|---------|-------|
-| [v1.0.1](https://github.com/iamaanahmad/proofquest/releases/tag/v1.0.1) | Fixed Review Proof screen manifest loading |
-| [v1.0.0](https://github.com/iamaanahmad/proofquest/releases/tag/v1.0.0) | Initial submission build |
+| Version | Release date | Notes |
+|---------|--------------|-------|
+| [v1.0.1](https://github.com/iamaanahmad/proofquest/releases/tag/v1.0.1) | November 8, 2026 | Fixed Review Proof screen manifest loading |
+| [v1.0.0](https://github.com/iamaanahmad/proofquest/releases/tag/v1.0.0) | — | Initial submission build |
 
 ---
 

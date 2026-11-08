@@ -4,7 +4,7 @@
 
 ProofQuest is a mobile-first proof-and-payout protocol for real-world verification built on Solana. A requester locks USDC in an on-chain escrow, a nearby worker captures camera + GPS + timestamp evidence, submits a signed proof packet, and the requester approves to release the reward — entirely from an Android phone, no browser, no custodial account.
 
-Built for the **[CLOCK IN — Solana Mobile Hackathon](https://solanamobile.radiant.nexus/)** · Devnet · Oct 2026
+Built for the **[MLH Solana Hackathon](https://events.mlh.com/events/15200-solana-hackathon)** · Online · November 6–8, 2026 · Devnet
 
 ---
 

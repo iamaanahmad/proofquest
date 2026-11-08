@@ -49,7 +49,7 @@ Allow only public-place verification templates; ban surveillance, trespass, face
 Disputes
 MVP is requester-approved payment. Show that clearly before claim; use a seeded honest demo, not fake decentralised arbitration.
 Regulation
-Devnet only for the hackathon. Real launch needs review of marketplace terms, worker classification, sanctions/KYC, tax and money-transmission exposure by jurisdiction.
+Devnet only for the MLH Solana Hackathon. Real launch needs review of marketplace terms, worker classification, sanctions/KYC, tax and money-transmission exposure by jurisdiction.
 Cold start
 Do not launch a global marketplace. Seed one event/community with repeat quests and known testers.
 Prepared 22 Sep 2026. No repo, account or submission was created.

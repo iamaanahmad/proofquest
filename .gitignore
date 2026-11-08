@@ -25,3 +25,12 @@ mobile/android/.kotlin/
 # Misc
 .DS_Store
 *.log
+live_log.txt
+logs.txt
+
+# Kiro IDE session/agent files
+.kiro/
+mobile/.agents/
+
+# APK outputs — large binary, not needed in source repo
+mobile/android/app/build/outputs/

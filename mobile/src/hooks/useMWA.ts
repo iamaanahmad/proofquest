@@ -73,53 +73,70 @@ export async function signAndBroadcast(
 
   tx.feePayer = publicKey;
 
-  // The blockhash is fetched INSIDE the transact() session — immediately after
-  // authorization and immediately before signAndSendTransactions, with no other
-  // await in between — so staleness is reduced to the irreducible wallet-approval
-  // duration (the only unavoidable delay happens inside signAndSendTransactions
-  // itself, where Phantom renders its UI).
-  //
-  // Verified safe: the dApp's Solana RPC `connection` (Helius HTTP) and the MWA
-  // session (native transport) are independent channels. The installed
-  // @solana-mobile protocol holds the session open for the whole callback
-  // promise and only closes it when the callback settles or the native
-  // transport errors; a sub-second HTTP blockhash fetch does not signal, pause,
-  // or close the session. Fetching here (vs before transact) is what keeps the
-  // blockhash fresh — the old pre-session fetch is what caused expiry across the
-  // human round-trip.
-  //
-  // lastValidBlockHeight captured in-session is returned so the caller can run
-  // blockheight-aware confirmation (detect expiry fast instead of waiting out
-  // the full timeout) and gate a bounded fresh-blockhash retry.
-  let lastValidBlockHeight = 0;
+  // CRITICAL: the blockhash MUST be fetched BEFORE entering transact(), NOT
+  // inside the session callback. On Android, once Phantom foregrounds (after
+  // authorize), the OS can suspend our JS thread; any awaited RPC call issued
+  // inside the transact() callback then stalls, and the local-association MWA
+  // WebSocket session times out before the sign call runs — Phantom never shows
+  // the transaction prompt and control never returns. So we fetch here, as late
+  // as possible before transact(), and keep the session callback free of any
+  // awaited network call between authorize and signing.
+  const { blockhash, lastValidBlockHeight } = await getLatestBlockhashWithFallback();
+  tx.recentBlockhash = blockhash;
 
-  const rawSig = await transact(async (wallet) => {
+  // SIGN-ONLY via MWA, then BROADCAST from the app ourselves.
+  //
+  // We deliberately use signTransactions (not signAndSendTransactions): the
+  // problem with letting Phantom broadcast is the delay between our pre-session
+  // blockhash fetch and Phantom's actual network submission (plus the human
+  // approval time) — on devnet that routinely exceeds the ~60-90s blockhash
+  // lifetime, so the network drops the tx and nothing lands. By having Phantom
+  // only SIGN and then broadcasting the raw signed tx ourselves via our Helius
+  // RPC immediately after the session returns — in a tight retry loop with NO
+  // human delay — the send happens while the blockhash is still as fresh as it
+  // can be, and we control the submission/retry rather than depending on the
+  // wallet's broadcast behavior.
+  const signedTx = await transact(async (wallet) => {
     // Auth: silent reauthorize or full authorize (shows Phantom UI)
     await authorizeOrReauthorize(wallet);
 
-    // Refresh feePayer in case publicKey changed during auth
+    // Refresh feePayer in case publicKey changed during auth.
+    // NO awaited network/RPC call may go here — see the comment above.
     const { publicKey: freshPk } = useWalletStore.getState();
     if (freshPk) tx.feePayer = freshPk;
 
-    // Fetch the blockhash as late as possible — right before signing — then
-    // sign+send with NO intervening await so it stays maximally fresh.
-    const latest = await getLatestBlockhashWithFallback();
-    lastValidBlockHeight = latest.lastValidBlockHeight;
-    tx.recentBlockhash = latest.blockhash;
-
-    const signatures = await wallet.signAndSendTransactions({
-      transactions: [tx],
-      minContextSlot: 0,
-      skipPreflight: true,
-    });
-    return signatures[0]; // Uint8Array of raw signature bytes
+    const signed = await wallet.signTransactions({ transactions: [tx] });
+    return signed[0];
   });
 
-  // Encode the raw bytes to base58.
-  // We avoid bs58/Buffer here because react-native-quick-crypto replaces the
-  // global Buffer prototype, which breaks bs58's internal type check on Hermes.
-  // Instead we use a self-contained base58 encoder with no external deps.
-  return { sig: encodeBase58(new Uint8Array(rawSig)), lastValidBlockHeight };
+  // Serialize once; we re-send the SAME signed bytes on every retry.
+  const rawTx = signedTx.serialize();
+
+  // Broadcast ourselves, retrying the raw send for a few seconds. sendRawTransaction
+  // returns the base58 signature string directly (no bs58/Buffer dependency, so the
+  // Hermes/quick-crypto Buffer-prototype issue is avoided). skipPreflight keeps the
+  // submit fast; maxRetries:0 means WE own the retry cadence below.
+  const SEND_ATTEMPTS = 10;
+  let sig = "";
+  let lastErr: any;
+  for (let i = 0; i < SEND_ATTEMPTS; i++) {
+    try {
+      sig = await connection.sendRawTransaction(rawTx, {
+        skipPreflight: true,
+        maxRetries: 0,
+      });
+      break; // accepted by the RPC — stop re-sending
+    } catch (e: any) {
+      lastErr = e;
+      // Transient RPC/network error — wait briefly and re-send the same bytes.
+      await new Promise<void>((r) => setTimeout(() => r(), 1000));
+    }
+  }
+  if (!sig) {
+    throw lastErr ?? new Error("Failed to broadcast transaction");
+  }
+
+  return { sig, lastValidBlockHeight };
 }
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
